@@ -1,0 +1,138 @@
+import cv2
+from darkflow.net.build import TFNet
+import numpy as np
+import time
+import keyboard
+import datetime
+import threading
+#import Switch_Cam
+
+def pixelate(image):
+    # Get input size
+    height, width, _ = image.shape
+    # Desired "pixelated" size
+    h, w = (20, 20)
+    # Resize image to "pixelated" size
+    temp = cv2.resize(image, (w, h), interpolation=cv2.INTER_LINEAR)
+    # Initialize output image
+    return cv2.resize(temp, (width, height), interpolation=cv2.INTER_NEAREST)
+
+#def blurry(image):
+#    # Get input size
+#    height, width, _ = image.shape
+#
+#    # Check if the height and width are odd
+#    if height % 2 == 0:
+#        height -=1
+#    if width % 2 == 0:
+#        width -=1
+#    # Initialize output image
+#    return cv2.GaussianBlur(image, (width, height), -1, cv2.BORDER_REPLICATE)
+
+options = {
+    'model': './cfg/yolo.cfg',
+    'load': './bin/yolo.weights',
+    'threshold': 0.2,
+    'gpu': 0.0
+}
+
+tfnet = TFNet(options)
+colors = [tuple(255 * np.random.rand(3)) for _ in range(10)]
+
+capture = cv2.VideoCapture("http://root:qazwsx123*@192.168.0.94/mjpg/video.mjpg")   #capture = cv2.VideoCapture(0) for webcam    "http://root:qazwsx123*@192.168.0.92/mjpg/video.mjpg"
+#  root / admin
+#  qazwsx123* / yolo-video-2020
+print(capture)
+
+capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+nbVideo = 3
+indexVideo = 0
+threshold=20000
+current_milli_time = lambda: int(round(time.time()*1000))
+start_time=current_milli_time()
+
+while True:
+    #from Switch_Cam import line
+    #capture = cv2.VideoCapture(line)
+    #indexVideo = indexVideo % nbVideo
+    #file = open("/home/videoserver/darkflow/video_path", "r")
+    #video = file.readlines()[indexVideo]
+    #video = video.rstrip("\n")
+    #capture = cv2.VideoCapture(video)
+    #capture = cv2.VideoCapture(file)
+    #indexVideo+=1
+
+    #if keyboard.is_pressed('1'):
+    #    capture = cv2.VideoCapture('./sample_img/sample_office_.jpg')
+    #elif keyboard.is_pressed('2'):
+    #    capture = cv2.VideoCapture('./sample_img/sample_person.jpg')
+    #elif keyboard.is_pressed('3'):
+    #    capture = cv2.VideoCapture('./sample_img/sample_group.jpeg')
+    #elif keyboard.is_pressed('4'):
+    #    capture = cv2.VideoCapture('./sample_img/walk.mp4')
+
+    intermediate_time = current_milli_time()
+    #if keyboard.is_pressed('space'):
+    if intermediate_time - start_time > threshold:
+            indexVideo = (indexVideo + 1) % nbVideo
+            file = open("/home/videoserver/darkflow/video_path", "r")
+            video = file.readlines()[indexVideo]
+            video = video.rstrip("\n")
+            capture =cv2.VideoCapture(video)
+            start_time=current_milli_time()
+
+        
+
+    capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    stime = time.time()
+    ret, frame = capture.read()
+    if ret:
+        frame = np.asarray(frame)
+        results = tfnet.return_predict(frame)
+
+        for color, result in zip(colors, results):
+            if result['label'] == 'person':
+                x = result['topleft']['x']
+                y = result['topleft']['y']
+                w = result['bottomright']['x']
+                h = result['bottomright']['y']
+                wTmp = w-x
+                hTmp = h-y
+
+                # Extract ROI
+                ROI = frame[y:y+hTmp, x: x+wTmp]
+                # Pixelate ROI
+                pixelated_ROI = pixelate(ROI)
+                # Paste pixelated ROI back into original image
+                frame[y:y+hTmp, x:x+wTmp] = pixelated_ROI
+
+                tl = (result['topleft']['x'], result['topleft']['y'])
+                br = (result['bottomright']['x'], result['bottomright']['y'])
+                label = result['label']
+                confidence = result['confidence']
+                text = '{}: {:.0f}%'.format(label, confidence * 100)
+
+                # Put a box on the detected person
+                #frame = cv2.rectangle(frame, tl, br, color, 5)
+
+                # Put text above the person detected
+
+                #frame = cv2.putText(
+                #    frame, text, tl, cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+        # Put date on the top of the capture
+        frame = cv2.putText(
+            frame, str(datetime.datetime.now())[0:16] , (0, 25), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0), 2)
+        # Put text on the top of the capture
+        frame = cv2.putText(
+            frame, ' Swag Person detection Privacy', (-15, 55), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 0), 2)
+        cv2.imshow('frame', frame)
+        
+        print('FPS {:.1f}'.format(1 / (time.time() - stime)))
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+capture.release()
+cv2.destroyAllWindows()
